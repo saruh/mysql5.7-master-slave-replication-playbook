@@ -1,0 +1,9 @@
+yum_repo_rpms:
+  - 'http://dev.mysql.com/get/mysql57-community-release-el6-7.noarch.rpm'
+  - 'http://iij.dl.osdn.jp/linux-ha/63919/pacemaker-repo-1.1.13-1.1.el6.x86_64.rpm'
+
+install_packages:
+  - 'mysql-server'
+  - 'pacemaker-all'
+
+ha_user: 'ha-user'

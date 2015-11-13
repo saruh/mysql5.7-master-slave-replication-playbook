@@ -1,0 +1,3 @@
+hostname: db1.localnet
+#ip: 10.11.22.101
+server_id: 1

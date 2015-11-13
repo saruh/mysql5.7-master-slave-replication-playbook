@@ -1,0 +1,7 @@
+- hosts: dbservers
+  sudo: yes
+  vars:
+    - logpath: /var/log/mysqld.log
+  roles:
+    - common
+    - db

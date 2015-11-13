@@ -1,0 +1,29 @@
+#
+# ------ for ssh connection ------
+#
+
+- name: set .ssh/id_rsa
+  #copy: "src={{ ssh_key_path }} dest=/home/{{ ha_user }}/.ssh/id_rsa owner={{ ha_user }} group={{ ha_user }} mode=0600"
+  copy: "src={{ ssh_key_path }} dest=/etc/ssh/id_rsa owner=root group=root mode=0600"
+  tags: ssh
+
+#
+# ------ for mysqlfailover ------
+#
+
+- name: set /etc/init.d/mysqlfailover
+  template: src=mysqlfailover.sh dest=/etc/init.d/mysqlfailover mode=0755
+  tags: mysqlfailover
+
+- name: set /usr/local/bin/after_failover.sh
+  copy: src=after_failover.sh dest=/usr/local/bin/after_failover.sh mode=0755
+  tags: mysqlfailover
+
+# 未実装
+# pacemakerによってvipのみが切り替わった際の処理
+# [想定処理]
+# ・read_onlyの切り替え
+# ・vipが冗長になっている場合は、不正な方のvipを削除
+# - name: set /usr/local/bin/failchk.sh
+#   copy: src=failchk.sh dest=/usr/local/bin/failchk.sh mode=0755
+#   tags: mysqlfailover

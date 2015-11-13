@@ -1,0 +1,158 @@
+#
+# ------ for ssh ------
+#
+- name: user add
+  user: "name={{ ha_user }} state=present"
+  tags: ssh
+
+- name: add a sudo user
+  lineinfile: "dest=/etc/sudoers.d/{{ ha_user }} create=yes state=present regexp='{{ item.regexp }}' line='{{ item.line }}'"
+  with_items:
+    - regexp: '^{{ ha_user }}'
+      line: '{{ ha_user }} ALL=(ALL) NOPASSWD: ALL'
+    - regexp: '^Defaults:{{ ha_user }}'
+      line: 'Defaults:{{ ha_user }} !requiretty'
+  tags: ssh
+
+- name: create directory
+  file: "state=directory path=/home/{{ ha_user }}/.ssh owner={{ ha_user }} group={{ ha_user }} mode=0700"
+  tags: ssh
+
+- name: set .ssh/authorized_keys
+  copy: "src={{ ssh_key_path }}.pub dest=/home/{{ ha_user }}/.ssh/authorized_keys owner={{ ha_user }} group={{ ha_user }} mode=0600"
+  tags: ssh
+
+- name: set .ssh/id_rsa
+  copy: "src={{ ssh_key_path }} dest=/home/{{ ha_user }}/.ssh/id_rsa owner={{ ha_user }} group={{ ha_user }} mode=0600"
+  tags: ssh
+
+# どのユーザが実行するかわからないため、configの設定はしない。
+#  - name: set .ssh/config
+#   tags: ssh
+
+#
+# ------ for corosync ------
+#
+
+- name: set /etc/corosync/corosync.conf
+  copy: src=corosync.conf dest=/etc/corosync/corosync.conf
+  tags: corosync
+
+- name: set /etc/corosync/authkey
+  copy: src=authkey dest=/etc/corosync/authkey
+  tags: corosync
+
+- name: launch corosync
+  service: name=corosync state=running enabled=yes
+  tags: corosync
+
+
+#
+# ------ for pacemaker ------
+#
+# SysV    => x  --- pacemaker.combined がないため
+# Upstart => o
+#
+# 起動処理は、手動で行うため、ここでの設定はしない。
+#
+
+# [corosyncが検知]
+# - corosync kill ---> mysqld 停止 / corosync 再起動 / pacemaker 継続 ------> HA構成のmysqlが両方停止してしまった！！！
+# - pacemaker kill ----> mysqld 停止 / corosync 継続 / pacemaker 再起動 ------> 両デバイスのmysqlが停止してしまった！！！
+# - pacemaker resource kill mysqld 停止 / corosync 継続 / pacemaker 再起動 ------> 両デバイスのmysqlが停止してしまった！！！
+# VIPを外す時にmysqldを止めるようにscriptを編集
+# - name: modify /usr/lib/ocf/resource.d/heartbeat/IPaddr2
+#   shell: |
+#     [ ! -f /usr/lib/ocf/resource.d/heartbeat/IPaddr2.bk ] \
+#       && cp -a /usr/lib/ocf/resource.d/heartbeat/IPaddr2 /usr/lib/ocf/resource.d/heartbeat/IPaddr2.bk;
+#     sed -i "s/^\(stop)\t\t\)\(ip_stop\)$/\1\/etc\/init.d\/mysqld stop\n\t\t\2/" /usr/lib/ocf/resource.d/heartbeat/IPaddr2
+#   tags: pacemaker
+#
+#
+# - corosync kill ---> mysqld 継続 / corosync 停止 / pacemaker 継続 ------> HA構成のmysqlが両方停止してしまった！！！
+# - pacemaker kill ----> mysqld 停止 / corosync 継続 / pacemaker 再起動 ------> 両デバイスのmysqlが停止してしまった！！！
+# - pacemaker resource kill mysqld 停止 / corosync 継続 / pacemaker 再起動 ------> 両デバイスのmysqlが停止してしまった！！！
+#- name: modify /usr/lib/ocf/resource.d/heartbeat/IPaddr2
+#  shell: |
+#    [ ! -f /usr/lib/ocf/resource.d/heartbeat/IPaddr2.bk ] \
+#      && sudo cp -a /usr/lib/ocf/resource.d/heartbeat/IPaddr2 /usr/lib/ocf/resource.d/heartbeat/IPaddr2.bk;
+#    sed -i "s/^\(stop)\t\t\ip_stop\)$/\1\n\t\t\/etc\/init.d\/mysqld stop/" /usr/lib/ocf/resource.d/heartbeat/IPaddr2
+#  tags: pacemaker
+
+#
+# ------ for mysql ------
+#
+
+# 初回起動の判定として、ログファイルのチェックを実施
+- name: check mysqld.log
+  stat: path={{ logpath }}
+  register: f
+  tags: mysqld
+#- debug: var=f.stat.size
+
+#
+# 初期化コマンド「mysql_install_db」はprovisioning toolで実行するのは
+# リスクを伴うため、あえて実行しない。（「~/.mysql_secret」が出力されない。）
+# その代わり設定ファイルの変更なしで、一旦起動させパスワードを確認する。
+#
+
+# 起動＆サービス登録
+- name: launch mysqld
+  service: name=mysqld state=running enabled=yes
+  tags: mysqld
+
+# 設定ファイルの変更
+- name: set /etc/my.cnf
+  template: src=my.cnf dest=/etc/my.cnf
+  register: configuration_file
+  tags: mysqld
+
+# mysqld restart
+- name: mysqld restart
+  service: name=mysqld state=restarted
+  when: configuration_file.changed
+  tags: mysqld
+
+# [初回起動] 自動で割り振られたパスワードを取得
+- name: get root password
+  shell: |
+    head /var/log/mysqld.log \
+    | grep 'A temporary password is generated for root@localhost' \
+    | awk -F' ' '{print $NF}'
+  register: root_init_password
+  when: f.stat.size == 0
+  tags: mysqld
+#- debug:
+#    var: root_init_password.stdout
+#  when: root_init_password.changed
+#  tags: mysqld
+
+# [初回起動] パスワード変更
+- name: change root password
+  shell: |
+    mysql -u root -p'{{ root_init_password.stdout }}' \
+          -e "SET PASSWORD FOR 'root'@'localhost' = PASSWORD('{{ dbrootpassword }}')" \
+          --connect-expired-password
+  when: root_init_password.changed and root_init_password.stdout != ""
+  tags: mysqld
+
+# mysql-utilities用にユーザを作成
+#   %を利用した宣言だと接続時にエラーになるため個別に設定。
+- name: create user for mysql-utilities
+  shell: |
+    mysql -u root -p'{{ dbrootpassword }}' \
+         -e "GRANT ALL ON *.* TO root@'{{ item.ip }}' IDENTIFIED BY '{{ dbrootpassword }}' WITH GRANT OPTION;" 2>/dev/null
+  with_items: host_items
+  tags: mysqld-group-replication
+
+# replication用にユーザを作成
+#   master/slaveの切り替え時にhostnameを使用する場合があり、
+#   IPだけの設定だとエラーになることがあるのでIPとhostnameは分けて登録。
+- name: create mysqlreplicate user
+  shell: |
+    mysql -u root -p'{{ dbrootpassword }}' \
+         -e "GRANT REPLICATION SLAVE ON *.* TO '{{ dbrpluser }}'@'{{ item.ip }}' IDENTIFIED BY '{{ dbrplpassword }}';" 2>/dev/null
+    mysql -u root -p'{{ dbrootpassword }}' \
+         -e "GRANT REPLICATION SLAVE ON *.* TO '{{ dbrpluser }}'@'{{ item.name }}' IDENTIFIED BY '{{ dbrplpassword }}';" 2>/dev/null
+  with_items: host_items
+  tags: mysqld-group-replication

@@ -1,0 +1,51 @@
+#
+# 環境値を取得
+# ansible -m setup -i test db1
+#
+# - debug: var=ansible_distribution_version
+# - debug: var={{ ansible_distribution_version[2:]|int < 7 }}
+
+#
+# Prepare the requirements
+#
+- name: check the system requirements ( RHEL6 or CentOS6 )
+  shell: |
+    if [ -f /etc/redhat-release ]; then
+      [ `cat /etc/redhat-release | sed -e 's/^.*\([1-9]\)\+.[1-9]\+.*$/\1/g'` -ne 6 ] && echo "Valid major version is 6 only." >&2
+    else
+      echo "Valid distribution is RedHat or CentOS" >&2
+    fi
+  register: command_result
+  failed_when: command_result.stderr
+  tags: common
+
+- name: yum update
+  yum: name=* state=latest
+  when: ansible_distribution == "CentOS" and ansible_distribution_version[2:]|int < 7
+  tags: common
+
+- name: install yum repo
+  yum: name={{ item }} state=present
+  with_items: yum_repo_rpms
+  tags: common
+
+- name: install application
+  yum: name={{ item }} state=present
+  with_items: install_packages
+  tags: init
+
+#
+# Setting system's hostname
+#
+- name: change hostname
+  shell: |
+    sed -i -e 's/\(HOSTNAME=\).*/\1{{ hostname }}/g' /etc/sysconfig/network
+    hostname {{ hostname }}
+  tags: common
+
+- name: change /etc/hosts
+  shell: |
+    sed -i '/^{{ item.ip + "\t" + item.name }}$/d' /etc/hosts
+    echo -e '{{ item.ip + "\t" + item.name }}' >> /etc/hosts
+  with_items: host_items
+  tags: common

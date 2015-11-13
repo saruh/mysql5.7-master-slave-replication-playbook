@@ -1,0 +1,5 @@
+- hosts: batchservers
+  sudo: yes
+  roles:
+    - common
+    - batch

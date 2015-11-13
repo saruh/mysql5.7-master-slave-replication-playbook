@@ -1,0 +1,16 @@
+host_items:
+  - ip:   '10.11.22.101'
+    name: 'db1.localnet'
+    type: 'db'
+  - ip:   '10.11.22.102'
+    name: 'db2.localnet'
+    type: 'db'
+  - ip:   '10.11.22.111'
+    name: 'bt1.localnet'
+    type: 'batch'
+
+dbrootpassword: 'root'
+dbrpluser: 'rpl_user'
+dbrplpassword: 'rpl_pass'
+
+ssh_key_path: '~/.ssh/id_rsa'
